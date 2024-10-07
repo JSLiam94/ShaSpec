@@ -6,7 +6,6 @@ import torch
 import numpy as np
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
-import torch.nn.functional as F
 import torch.nn as nn
 
 import os
@@ -43,10 +42,10 @@ def get_arguments():
     parser = argparse.ArgumentParser(description="Shared-Specific model for 3D Medical Image Segmentation.")
 
     parser.add_argument("--data_dir", type=str, default='./datalist/')
-    parser.add_argument("--train_list", type=str, default='BraTS20/BraTS20_train.csv')
-    parser.add_argument("--val_list", type=str, default='BraTS20_val.csv')
-    parser.add_argument("--snapshot_dir", type=str, default='snapshots/example/')
-    parser.add_argument("--reload_path", type=str, default='snapshots/example/last.pth')
+    parser.add_argument("--train_list", type=str, default='train.csv')
+    parser.add_argument("--val_list", type=str, default='val.csv')
+    parser.add_argument("--snapshot_dir", type=str, default='snapshots/')
+    parser.add_argument("--reload_path", type=str, default='snapshots/BraTS24_ShaSpec_[80,160,160]_SGD_b1_lr-2_alpha.1_beta.02_rand_mode/last.pth')
     parser.add_argument("--reload_from_checkpoint", type=str2bool, default=False)
     parser.add_argument("--input_size", type=str, default='80,160,160')
     parser.add_argument("--batch_size", type=int, default=1)
@@ -71,7 +70,7 @@ def get_arguments():
     parser.add_argument("--norm_cfg", type=str, default='IN')  # normalization
     parser.add_argument("--activation_cfg", type=str, default='LeakyReLU')  # activation
     parser.add_argument("--train_only", action="store_true")
-    parser.add_argument("--mode", type=str, default='0,1,2,3')
+    parser.add_argument("--mode", type=str, default='random')
 
     return parser
 
@@ -101,7 +100,7 @@ def dice_score(preds, labels):
 
 def compute_dice_score(preds, labels):
 
-    preds = F.sigmoid(preds)
+    preds = torch.sigmoid(preds)
 
     pred_ET = preds[:, 0, :, :, :]
     pred_WT = preds[:, 1, :, :, :]
@@ -332,7 +331,8 @@ def main():
                 torch.save(checkpoint, osp.join(args.snapshot_dir, 'last.pth'))
 
             # val
-            if not args.train_only and i_iter % args.val_pred_every == args.val_pred_every - 1:
+            #if not args.train_only and i_iter % args.val_pred_every == args.val_pred_every - 1:
+            if i_iter % args.val_pred_every == args.val_pred_every - 1:
                 print('validate ...')
                 val_ET, val_WT, val_TC = validate(args, input_size, model, valloader, args.num_classes)
                 if (args.local_rank == 0):
