@@ -88,3 +88,5 @@ If you got a chance to use our code, you could consider to cite our paper with t
 ```
 
 Enjoy!!
+
+Now is available for BRATS2024's dataset
