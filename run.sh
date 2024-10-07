@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 time=$(date "+%Y%m%d-%H%M%S")
-name=BraTS18_ShaSpec_[80,160,160]_SGD_b1_lr-2_alpha.1_beta.02_trainOnly
+name=BraTS24_ShaSpec_[80,160,160]_SGD_b1_lr-2_alpha.1_beta.02_trainOnly
 
 CUDA_VISIBLE_DEVICES=$1 python train_SS.py \
 --snapshot_dir=snapshots/$name/ \
@@ -13,8 +13,8 @@ CUDA_VISIBLE_DEVICES=$1 python train_SS.py \
 --learning_rate=1e-2 \
 --num_classes=3 \
 --num_workers=4 \
---train_list=BraTS18/BraTS18_train_all.csv \
---val_list=BraTS18/BraTS18_val.csv \
+--train_list=train_all.csv \
+--val_list=val.csv \
 --random_mirror=True \
 --random_scale=True \
 --weight_std=True \
@@ -24,7 +24,7 @@ CUDA_VISIBLE_DEVICES=$1 python train_SS.py \
 
 
 time=$(date "+%Y%m%d-%H%M%S")
-name=BraTS18_ShaSpec_[80,160,160]_SGD_b1_lr-2_alpha.1_beta.02_trainOnly_rand_mode
+name=BraTS24_ShaSpec_[80,160,160]_SGD_b1_lr-2_alpha.1_beta.02_trainOnly_rand_mode
 
 CUDA_VISIBLE_DEVICES=$1 python train_SS.py \
 --snapshot_dir=snapshots/$name/ \
@@ -36,8 +36,8 @@ CUDA_VISIBLE_DEVICES=$1 python train_SS.py \
 --learning_rate=1e-2 \
 --num_classes=3 \
 --num_workers=4 \
---train_list=BraTS18/BraTS18_train_all.csv \
---val_list=BraTS18/BraTS18_val.csv \
+--train_list=train_all.csv \
+--val_list=val.csv \
 --random_mirror=True \
 --random_scale=True \
 --weight_std=True \
