@@ -30,17 +30,17 @@ class BraTSDataSet(data.Dataset):
             if item[0] == 'BraTS_2020_subject_ID':
                 continue
             filepath = item[0] + '/' + osp.splitext(osp.basename(item[0]))[0]
-            # flair_file = filepath + '_flair.nii.gz'  # BraTS20
-            # t1_file = filepath + '_t1.nii.gz'
-            # t1ce_file = filepath + '_t1ce.nii.gz'
-            # t2_file = filepath + '_t2.nii.gz'
-            # label_file = filepath + '_seg.nii.gz'
+            # flair_file = filepath + '-t2f.nii.gz'  # BraTS20
+            # t1_file = filepath + '-t1n.nii.gz'
+            # t1ce_file = filepath + '-t1c.nii.gz'
+            # t2_file = filepath + '-t2w.nii.gz'
+            # label_file = filepath + '-seg.nii.gz'
 
-            flair_file = filepath + '_flair.nii'
-            t1_file = filepath + '_t1.nii'
-            t1ce_file = filepath + '_t1ce.nii'
-            t2_file = filepath + '_t2.nii'
-            label_file = filepath + '_seg.nii'
+            flair_file = filepath + '-t2f.nii.gz'
+            t1_file = filepath + '-t1n.nii.gz'
+            t1ce_file = filepath + '-t1c.nii.gz'
+            t2_file = filepath + '-t2w.nii.gz'
+            label_file = filepath + '-seg.nii.gz'
             name = osp.splitext(osp.basename(filepath))[0]
             self.files.append({
                 "flair": flair_file,
@@ -144,8 +144,7 @@ class BraTSDataSet(data.Dataset):
 
     # with scale
     def locate_bbx_wScale(self, label):
-
-        # randomly scale imgs
+        # 随机缩放图片
         scale_flag = False
         if self.scale and np.random.uniform() < 0.5:
             scaler = np.random.uniform(0.9, 1.1)
@@ -158,6 +157,7 @@ class BraTSDataSet(data.Dataset):
 
         class_num, img_d, img_h, img_w = label.shape
 
+        # 随机选择是否基于某个类别定位边界框
         if random.random() < 0.5:
             selected_class = np.random.choice(class_num)
             class_locs = []
@@ -166,10 +166,10 @@ class BraTSDataSet(data.Dataset):
                 class_locs = np.argwhere(class_label > 0)
 
             if len(class_locs) == 0:
-                # if no foreground found, then randomly select
-                d0 = random.randint(0, img_d - 0 - scale_d)
-                h0 = random.randint(15, img_h - 15 - scale_h)
-                w0 = random.randint(10, img_w - 10 - scale_w)
+                # 如果没有前景，则随机选择
+                d0 = random.randint(0, img_d - scale_d)
+                h0 = random.randint(max(15 - scale_h, 0), img_h - max(15, scale_h))
+                w0 = random.randint(max(10 - scale_w, 0), img_w - max(10, scale_w))
                 d1 = d0 + scale_d
                 h1 = h0 + scale_h
                 w1 = w0 + scale_w
@@ -177,6 +177,7 @@ class BraTSDataSet(data.Dataset):
                 selected_voxel = class_locs[np.random.choice(len(class_locs))]
                 center_d, center_h, center_w = selected_voxel
 
+                # 计算边界框的位置
                 d0 = center_d - scale_d // 2
                 d1 = center_d + scale_d // 2
                 h0 = center_h - scale_h // 2
@@ -184,45 +185,41 @@ class BraTSDataSet(data.Dataset):
                 w0 = center_w - scale_w // 2
                 w1 = center_w + scale_w // 2
 
+                # 确保边界框不超出图像范围
                 if h0 < 0:
-                    delta = h0 - 0
                     h0 = 0
-                    h1 = h1 - delta
+                    h1 = min(img_h, scale_h)
                 if h1 > img_h:
-                    delta = h1 - img_h
-                    h0 = h0 - delta
                     h1 = img_h
+                    h0 = max(0, img_h - scale_h)
                 if w0 < 0:
-                    delta = w0 - 0
                     w0 = 0
-                    w1 = w1 - delta
+                    w1 = min(img_w, scale_w)
                 if w1 > img_w:
-                    delta = w1 - img_w
-                    w0 = w0 - delta
                     w1 = img_w
+                    w0 = max(0, img_w - scale_w)
                 if d0 < 0:
-                    delta = d0 - 0
                     d0 = 0
-                    d1 = d1 - delta
+                    d1 = min(img_d, scale_d)
                 if d1 > img_d:
-                    delta = d1 - img_d
-                    d0 = d0 - delta
                     d1 = img_d
-
+                    d0 = max(0, img_d - scale_d)
         else:
-            d0 = random.randint(0, img_d - 0 - scale_d)
-            h0 = random.randint(15, img_h - 15 - scale_h)
-            w0 = random.randint(10, img_w - 10 - scale_w)
+            # 随机选择位置
+            d0 = random.randint(0, img_d - scale_d)
+            h0 = random.randint(max(15 - scale_h, 0), img_h - max(15, scale_h))
+            w0 = random.randint(max(10 - scale_w, 0), img_w - max(10, scale_w))
             d1 = d0 + scale_d
             h1 = h0 + scale_h
             w1 = w0 + scale_w
 
-        d0 = np.max([d0, 0])
-        d1 = np.min([d1, img_d])
-        h0 = np.max([h0, 0])
-        h1 = np.min([h1, img_h])
-        w0 = np.max([w0, 0])
-        w1 = np.min([w1, img_w])
+        # 确保边界框不超出图像范围
+        d0 = max(0, d0)
+        d1 = min(img_d, d1)
+        h0 = max(0, h0)
+        h1 = min(img_h, h1)
+        w0 = max(0, w0)
+        w1 = min(img_w, w1)
 
         return [d0, d1, h0, h1, w0, w1], scale_flag
 
@@ -457,17 +454,17 @@ class BraTSValDataSet(data.Dataset):
             if item[0] == 'BraTS_2020_subject_ID':
                 continue
             filepath = item[0] + '/' + osp.splitext(osp.basename(item[0]))[0]
-            # flair_file = filepath + '_flair.nii.gz'  # BraTS20
-            # t1_file = filepath + '_t1.nii.gz'
-            # t1ce_file = filepath + '_t1ce.nii.gz'
-            # t2_file = filepath + '_t2.nii.gz'
-            # label_file = filepath + '_seg.nii.gz'
+            # flair_file = filepath + '-t2f.nii.gz'  # BraTS20
+            # t1_file = filepath + '-t1n.nii.gz'
+            # t1ce_file = filepath + '-t1c.nii.gz'
+            # t2_file = filepath + '-t2w.nii.gz'
+            # label_file = filepath + '-seg.nii.gz'
 
-            flair_file = filepath + '_flair.nii'
-            t1_file = filepath + '_t1.nii'
-            t1ce_file = filepath + '_t1ce.nii'
-            t2_file = filepath + '_t2.nii'
-            label_file = filepath + '_seg.nii'
+            flair_file = filepath + '-t2f.nii.gz'
+            t1_file = filepath + '-t1n.nii.gz'
+            t1ce_file = filepath + '-t1c.nii.gz'
+            t2_file = filepath + '-t2w.nii.gz'
+            label_file = filepath + '-seg.nii.gz'
             name = osp.splitext(osp.basename(filepath))[0]
             self.files.append({
                 "flair": flair_file,
@@ -555,17 +552,17 @@ class BraTSEvalDataSet(data.Dataset):
             if item[0] == 'BraTS_2020_subject_ID':
                 continue
             filepath = item[0] + '/' + osp.splitext(osp.basename(item[0]))[0]
-            # flair_file = filepath + '_flair.nii.gz'  # BraTS20
-            # t1_file = filepath + '_t1.nii.gz'
-            # t1ce_file = filepath + '_t1ce.nii.gz'
-            # t2_file = filepath + '_t2.nii.gz'
-            # label_file = filepath + '_seg.nii.gz'
+            # flair_file = filepath + '-t2f.nii.gz'  # BraTS20
+            # t1_file = filepath + '-t1n.nii.gz'
+            # t1ce_file = filepath + '-t1c.nii.gz'
+            # t2_file = filepath + '-t2w.nii.gz'
+            # label_file = filepath + '-seg.nii.gz'
 
-            flair_file = filepath + '_flair.nii'
-            t1_file = filepath + '_t1.nii'
-            t1ce_file = filepath + '_t1ce.nii'
-            t2_file = filepath + '_t2.nii'
-            label_file = filepath + '_seg.nii'
+            flair_file = filepath + '-t2f.nii.gz'
+            t1_file = filepath + '-t1n.nii.gz'
+            t1ce_file = filepath + '-t1c.nii.gz'
+            t2_file = filepath + '-t2w.nii.gz'
+            label_file = filepath + '-seg.nii.gz'
             name = osp.splitext(osp.basename(filepath))[0]
             self.files.append({
                 "flair": flair_file,
