@@ -36,11 +36,11 @@ class BraTSDataSet(data.Dataset):
             # t2_file = filepath + '-t2w.nii.gz'
             # label_file = filepath + '-seg.nii.gz'
 
-            flair_file = filepath + '-t2f.nii.gz'
-            t1_file = filepath + '-t1n.nii.gz'
-            t1ce_file = filepath + '-t1c.nii.gz'
-            t2_file = filepath + '-t2w.nii.gz'
-            label_file = filepath + '-seg.nii.gz'
+            flair_file = filepath + '_flair.nii.gz'
+            t1_file = filepath + '_t1.nii.gz'
+            t1ce_file = filepath + '_t1ce.nii.gz'
+            t2_file = filepath + '_t2.nii.gz'
+            label_file = filepath + '_seg.nii.gz'
             name = osp.splitext(osp.basename(filepath))[0]
             self.files.append({
                 "flair": flair_file,
@@ -460,11 +460,11 @@ class BraTSValDataSet(data.Dataset):
             # t2_file = filepath + '-t2w.nii.gz'
             # label_file = filepath + '-seg.nii.gz'
 
-            flair_file = filepath + '-t2f.nii.gz'
-            t1_file = filepath + '-t1n.nii.gz'
-            t1ce_file = filepath + '-t1c.nii.gz'
-            t2_file = filepath + '-t2w.nii.gz'
-            label_file = filepath + '-seg.nii.gz'
+            flair_file = filepath + '_flair.nii.gz'
+            t1_file = filepath + '_t1.nii.gz'
+            t1ce_file = filepath + '_t1ce.nii.gz'
+            t2_file = filepath + '_t2.nii.gz'
+            label_file = filepath + '_seg.nii.gz'
             name = osp.splitext(osp.basename(filepath))[0]
             self.files.append({
                 "flair": flair_file,
@@ -558,11 +558,11 @@ class BraTSEvalDataSet(data.Dataset):
             # t2_file = filepath + '-t2w.nii.gz'
             # label_file = filepath + '-seg.nii.gz'
 
-            flair_file = filepath + '-t2f.nii.gz'
-            t1_file = filepath + '-t1n.nii.gz'
-            t1ce_file = filepath + '-t1c.nii.gz'
-            t2_file = filepath + '-t2w.nii.gz'
-            label_file = filepath + '-seg.nii.gz'
+            flair_file = filepath + '_flair.nii.gz'
+            t1_file = filepath + '_t1.nii.gz'
+            t1ce_file = filepath + '_t1ce.nii.gz'
+            t2_file = filepath + '_t2.nii.gz'
+            label_file = filepath + '_seg.nii.gz'
             name = osp.splitext(osp.basename(filepath))[0]
             self.files.append({
                 "flair": flair_file,
