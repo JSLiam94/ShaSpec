@@ -41,14 +41,14 @@ def get_arguments():
     """
     parser = argparse.ArgumentParser(description="Shared-Specific model for 3D Medical Image Segmentation.")
 
-    parser.add_argument("--data_dir", type=str, default='./datalist/')
+    parser.add_argument("--data_dir", type=str, default='./')
     parser.add_argument("--train_list", type=str, default='train.csv')
     parser.add_argument("--val_list", type=str, default='val.csv')
     parser.add_argument("--snapshot_dir", type=str, default='snapshots/')
     parser.add_argument("--reload_path", type=str, default='snapshots/BraTS24_ShaSpec_[80,160,160]_SGD_b1_lr-2_alpha.1_beta.02_rand_mode/last.pth')
     parser.add_argument("--reload_from_checkpoint", type=str2bool, default=False)
     parser.add_argument("--input_size", type=str, default='80,160,160')
-    parser.add_argument("--batch_size", type=int, default=1)
+    parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--num_gpus", type=int, default=1)
     parser.add_argument('--local_rank', type=int, default=0)
     parser.add_argument("--num_steps", type=int, default=40000)
@@ -99,18 +99,23 @@ def dice_score(preds, labels):
 
 
 def compute_dice_score(preds, labels):
-
+    # 应用 sigmoid 激活函数
     preds = torch.sigmoid(preds)
-
-    pred_ET = preds[:, 0, :, :, :]
-    pred_WT = preds[:, 1, :, :, :]
-    pred_TC = preds[:, 2, :, :, :]
-    label_ET = labels[:, 0, :, :, :]
-    label_WT = labels[:, 1, :, :, :]
-    label_TC = labels[:, 2, :, :, :]
+    
+    # 根据新的定义计算WT, TC, ET
+    pred_WT = (labels == 1).float() + (labels == 2).float() + (labels == 3).float() # 全部非零预测值
+    pred_TC = (preds == 1).float() + (preds == 3).float()  # 标签为1或3的预测值
+    pred_ET = (preds == 4).float()  # 只有标签为4的预测值
+    
+    label_WT = (labels == 1).float() + (labels == 2).float() + (labels == 3).float()  # 全部非零真实值
+    label_TC = (labels == 1).float() + (labels == 3).float()  # 标签为1或3的真实值
+    label_ET = (labels == 4).float()  # 只有标签为4的真实值
+    
+    # 计算DICE分数
     dice_ET = dice_score(pred_ET, label_ET).cpu().data.numpy()
     dice_WT = dice_score(pred_WT, label_WT).cpu().data.numpy()
     dice_TC = dice_score(pred_TC, label_TC).cpu().data.numpy()
+    
     return dice_ET, dice_WT, dice_TC
 
 
@@ -340,7 +345,8 @@ def main():
                     writer.add_scalar('Val_WT_Dice', val_WT, i_iter)
                     writer.add_scalar('Val_TC_Dice', val_TC, i_iter)
                     print('Validate iter = {}, ET = {:.2}, WT = {:.2}, TC = {:.2}'.format(i_iter, val_ET, val_WT, val_TC))
-
+                    with open('./neemetrics2true.txt', 'a') as file:
+                        file.write(f'Validate iter = {i_iter}, ET = {val_ET:.2}, WT = {val_WT:.2}, TC = {val_TC:.2}\n')
                 if i_iter!=0 and (args.local_rank == 0) and (val_ET + val_WT + val_TC)/3 > val_Dice_best:
                     print('save model ...')
                     checkpoint = {
