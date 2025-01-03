@@ -162,7 +162,9 @@ def dice_score(preds, labels):
 def main():
     args = get_arguments()
 
+    # os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu
     d, h, w = map(int, args.input_size.split(','))
+
     input_size = (d, h, w)
 
     model = DualNet(args=args, norm_cfg=args.norm_cfg, activation_cfg=args.activation_cfg,
@@ -172,7 +174,7 @@ def main():
     print('loading from checkpoint: {}'.format(args.restore_from))
     if os.path.exists(args.restore_from):
         checkpoint = torch.load(args.restore_from)
-        model.load_state_dict(checkpoint['model'].state_dict())
+        model = checkpoint['model']
         trained_iters = checkpoint['iter']
         print("Loaded model trained for", trained_iters, "iters")
     else:
