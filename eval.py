@@ -11,7 +11,7 @@ from scipy.spatial.distance import cdist
 import pandas as pd
 import torch
 import torch.nn as nn
-
+from tqdm import tqdm
 from torch.utils import data
 from DualNet_SS import DualNet_SS as DualNet
 from BraTSDataSet import *
@@ -63,6 +63,7 @@ def pad_image(img, target_size):
 
 def predict_sliding(args, net, img_list, tile_size, classes):
     image, image_res = img_list
+    #interp = nn.Upsample(size=tile_size, mode='trilinear', align_corners=True)
     interp = nn.Upsample(size=tile_size, mode='trilinear', align_corners=True)
     image_size = image.shape
     overlap = 1/3
@@ -102,54 +103,79 @@ def predict_sliding(args, net, img_list, tile_size, classes):
                 full_probs[:, d1:d2, y1:y2, x1:x2] += prediction
 
     full_probs /= count_predictions
+    # full_probs = torch.sigmoid(full_probs)  # calc sigmoid later
+
     full_probs = full_probs.numpy().transpose(1,2,3,0)
     return full_probs
 
 
-def compute_hd95_single(pred, label, batch_size=1):
-    pred_points = np.argwhere(pred)
-    label_points = np.argwhere(label)
-
-    if pred_points.size == 0 and label_points.size == 0:
+def compute_hd95_single(pred, label, batch_size=1024):
+    if pred.size == 0 and label.size == 0:
         return 0  
-    if pred_points.size == 0 and label_points.size != 0:
-        return 373.13  
-    if pred_points.size != 0 and label_points.size == 0:
+    if pred.size == 0 or label.size == 0:
         return 373.13  
 
-    # 使用 KDTree 加速距离计算
-    tree_label = KDTree(label_points)
-    distances_pred_to_label = tree_label.query(pred_points, k=1)[0]
+    pred_points = torch.from_numpy(np.argwhere(pred > 0)).float().cuda()
+    label_points = torch.from_numpy(np.argwhere(label > 0)).float().cuda()
 
-    tree_pred = KDTree(pred_points)
-    distances_label_to_pred = tree_pred.query(label_points, k=1)[0]
+    if pred_points.size(0) == 0 or label_points.size(0) == 0:
+        return 373.13  
+
+    # 分批计算距离矩阵
+    distances_pred_to_label = []
+    for i in range(0, pred_points.size(0), batch_size):
+        batch_pred_points = pred_points[i:i+batch_size]
+        distances = torch.cdist(batch_pred_points.to(torch.float16), label_points.to(torch.float16)).min(dim=1).values
+        distances_pred_to_label.append(distances)
+
+    distances_label_to_pred = []
+    for i in range(0, label_points.size(0), batch_size):
+        batch_label_points = label_points[i:i+batch_size]
+        distances = torch.cdist(batch_label_points.to(torch.float16), pred_points.to(torch.float16)).min(dim=1).values
+        distances_label_to_pred.append(distances)
 
     # 合并距离
-    all_distances = np.concatenate((distances_pred_to_label, distances_label_to_pred))
+    all_distances = torch.cat(distances_pred_to_label + distances_label_to_pred)
 
     # 计算第 95 百分位数
-    hd95 = np.percentile(all_distances, 95)
+    hd95 = torch.kthvalue(all_distances, int(0.95 * all_distances.size(0)))[0].item()
     return hd95
 
+def compute_hd95(preds, labels, batch_size=1, num_threads=1):
+    """
+    计算 Hausdorff Distance 95% (HD95)。
 
-def compute_hd95(preds, labels, batch_size=1, num_threads=4):
+    参数:
+    - preds: 预测分割图，形状为 (batch_size, height, width, depth) 或 (batch_size, height, width)
+    - labels: 真实标签图，形状为 (batch_size, height, width, depth) 或 (batch_size, height, width)
+    - batch_size: 分批次计算距离时的批次大小
+    - num_threads: 并行计算的线程数
+
+    返回:
+    - hd95: HD95 的平均值
+    """
     assert preds.shape == labels.shape, "predict & target shapes don't match"
     batch_size = preds.shape[0]
     hd95_values = []
 
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
-        futures = [executor.submit(compute_hd95_single, preds[i], labels[i], batch_size) for i in range(batch_size)]
+        futures = [executor.submit(compute_hd95_single, preds[i], labels[i], batch_size=1024) for i in range(batch_size)]
         for future in futures:
             hd95_values.append(future.result())
 
     return np.mean(hd95_values)
-
-
 def dice_score(preds, labels):
     assert preds.shape[0] == labels.shape[0], "predict & target shapes don't match"
+    if preds.size == 0 and labels.size == 0:
+        return 1  
+    if preds.size == 0 and labels.size != 0:
+        return 0  
+    if preds.size != 0 and labels.size == 0:
+        return 0  
     preds = preds.astype(bool)
     labels = labels.astype(bool)
     
+    # 计算前景类的 Dice 系数
     intersection = np.sum(np.logical_and(preds, labels))
     union = np.sum(preds) + np.sum(labels)
     
@@ -157,7 +183,6 @@ def dice_score(preds, labels):
         return 1.0  # 如果预测和标签都是空的，Dice 系数为1
     
     return 2.0 * intersection / union
-
 
 def main():
     args = get_arguments()
@@ -186,7 +211,7 @@ def main():
 
     testloader = data.DataLoader(
         BraTSValDataSet(args.data_dir, args.data_list),
-        batch_size=1, shuffle=False, pin_memory=True, num_workers=1)
+        batch_size=1, shuffle=False, pin_memory=True, num_workers=2)
 
     if not os.path.exists('outputs'):
         os.makedirs('outputs')
@@ -199,8 +224,8 @@ def main():
     hd95_TC = 0
 
     results = []
-
-    for index, batch in enumerate(testloader):
+    #使用tqdm显示进度条
+    for index, batch in tqdm(enumerate(testloader), total=len(testloader), desc="val:"):
         image, image_res, label, size, name, affine = batch
         size = size[0].numpy()
         affine = affine[0].numpy()
@@ -210,40 +235,41 @@ def main():
 
         seg_pred_3class = np.asarray(np.around(output), dtype=np.uint8)
 
-        # 根据新的定义计算WT, TC, ET
-        seg_pred_WT = (seg_pred_3class == 1).astype(float) + (seg_pred_3class == 2).astype(float) + (seg_pred_3class == 3).astype(float)
-        seg_pred_TC = (seg_pred_3class == 1).astype(float) + (seg_pred_3class == 3).astype(float)
-        seg_pred_ET = (seg_pred_3class == 4).astype(float)
+        seg_pred_ET = seg_pred_3class[:, :, :, 0]
+        seg_pred_WT = seg_pred_3class[:, :, :, 1]
+        seg_pred_TC = seg_pred_3class[:, :, :, 2]
+        #seg_pred = np.zeros_like(seg_pred_ET)
+        seg_pred_WT = np.where(np.logical_or(seg_pred_WT == 1, seg_pred_WT == 2 ,seg_pred_WT ==3), 2, seg_pred_WT)  # 修改条件为1,2,3
+        seg_pred_TC = np.where(np.logical_or(seg_pred_TC == 1, seg_pred_TC == 3), 1, seg_pred_TC)
+        seg_pred_ET = np.where(seg_pred_ET == 4, 4, seg_pred_ET)  # 修改条件为等于4
+        #print(f"Processed segmentation prediction for {name}")
 
         seg_gt = np.asarray(label[0].numpy()[:size[0], :size[1], :size[2]], dtype=int)
+        seg_gt_ET = seg_gt[0, :, :, :]
+        seg_gt_WT = seg_gt[1, :, :, :]
+        seg_gt_TC = seg_gt[2, :, :, :]
+        #seg_gt = np.zeros_like(seg_gt_ET)
+        seg_gt_WT = np.where(np.logical_or(seg_gt_WT == 1, seg_gt_WT == 2, seg_gt_WT==3), 2, seg_gt_WT)  # 修改条件为1,2,3
+        seg_gt_TC = np.where(np.logical_or(seg_gt_TC == 1, seg_gt_TC == 3), 1, seg_gt_TC)
+        seg_gt_ET = np.where(seg_gt_ET == 4, 4, seg_gt_ET)  # 修改条件为等于4
+        # 计算 Dice 系数和 Hausdorff Distance 95%
 
-        # 计算WT, TC, ET
-        seg_gt_WT = (seg_gt == 1).astype(float) + (seg_gt == 2).astype(float) + (seg_gt == 3).astype(float)
-        seg_gt_TC = (seg_gt == 1).astype(float) + (seg_gt == 3).astype(float)
-        seg_gt_ET = (seg_gt == 4).astype(float)
-
-        print(f"Processed segmentation prediction for {name}")
-
-        dice_ET_i = dice_score(seg_pred_ET, seg_gt_ET)
-        dice_WT_i = dice_score(seg_pred_WT, seg_gt_WT)
-        dice_TC_i = dice_score(seg_pred_TC, seg_gt_TC)
-
-        hd95_ET_i = compute_hd95(seg_pred_ET, seg_gt_ET)
-        print(f"Computed HD95 for ET")
-        hd95_WT_i = compute_hd95(seg_pred_WT, seg_gt_WT)
-        print(f"Computed HD95 for WT")
-        hd95_TC_i = compute_hd95(seg_pred_TC, seg_gt_TC)
-        print(f"Computed HD95 for TC")
-
-        print('Processing {}: Dice_ET = {:.4}, Dice_WT = {:.4}, Dice_TC = {:.4}, HD95_ET = {:.4}, HD95_WT = {:.4}, HD95_TC = {:.4}, mode = {}'.format(
-            name, dice_ET_i, dice_WT_i, dice_TC_i, hd95_ET_i, hd95_WT_i, hd95_TC_i, args.mode))
         
-        if dice_ET_i == 0:
-            dice_ET_i = 1
-        if dice_WT_i == 0:
-            dice_WT_i = 1
-        if dice_TC_i == 0:
-            dice_TC_i = 1
+
+        dice_ET_i = dice_score(seg_pred_ET[None, :, :, :], seg_gt_ET[None, :, :, :])
+        dice_WT_i = dice_score(seg_pred_WT[None, :, :, :], seg_gt_WT[None, :, :, :])
+        dice_TC_i = dice_score(seg_pred_TC[None, :, :, :], seg_gt_TC[None, :, :, :])
+
+        hd95_ET_i = compute_hd95(seg_pred_ET[None, :, :, :], seg_gt_ET[None, :, :, :])
+        #print(f"Computed HD95 for ET")
+        hd95_WT_i = compute_hd95(seg_pred_WT[None, :, :, :], seg_gt_WT[None, :, :, :])
+        #print(f"Computed HD95 for WT")
+        hd95_TC_i = compute_hd95(seg_pred_TC[None, :, :, :], seg_gt_TC[None, :, :, :])
+        #print(f"Computed HD95 for TC")
+
+        #print('Processing {}: Dice_ET = {:.4}, Dice_WT = {:.4}, Dice_TC = {:.4}, HD95_ET = {:.4}, HD95_WT = {:.4}, HD95_TC = {:.4}, mode = {}'.format(
+        #    name, dice_ET_i, dice_WT_i, dice_TC_i, hd95_ET_i, hd95_WT_i, hd95_TC_i, args.mode))
+        
 
         dice_ET += dice_ET_i
         dice_WT += dice_WT_i
@@ -251,6 +277,11 @@ def main():
         hd95_ET += hd95_ET_i
         hd95_WT += hd95_WT_i
         hd95_TC += hd95_TC_i
+        #seg_pred = seg_pred.transpose((1, 2, 0))
+        #seg_pred = seg_pred.astype(np.int16)
+        #seg_pred = nib.Nifti1Image(seg_pred, affine=affine)
+        #seg_save_p = os.path.join('outputs/%s.nii.gz' % (name[0]))
+        #nib.save(seg_pred, seg_save_p)
 
         # 将结果添加到列表中
         results.append({
@@ -263,29 +294,30 @@ def main():
             'HD95_WT': hd95_WT_i,
             'HD95_TC': hd95_TC_i
         })
+            #将结果保存到 CSV 文件中
+        csv_file = './results-miccai.csv'
 
-    # 将结果保存到 CSV 文件中
-    csv_file = './results_micca.csv'
+        # 定义 CSV 文件的列名
+        fieldnames = ['Name', 'mode', 'Dice_ET', 'Dice_WT', 'Dice_TC', 'HD95_ET', 'HD95_WT', 'HD95_TC']
 
-    # 定义 CSV 文件的列名
-    fieldnames = ['Name', 'mode', 'Dice_ET', 'Dice_WT', 'Dice_TC', 'HD95_ET', 'HD95_WT', 'HD95_TC']
+        # 检查文件是否存在
+        file_exists = os.path.exists(csv_file)
 
-    # 检查文件是否存在
-    file_exists = os.path.exists(csv_file)
-
-    # 打开文件并追加新的记录
-    with open(csv_file, mode='a', newline='') as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
-        
-        # 如果文件不存在，写入表头
-        if not file_exists:
+        # 打开文件并追加新的记录
+        with open(csv_file, mode='w', newline='') as file:
+            writer = csv.DictWriter(file, fieldnames=fieldnames)
+            
+            # 如果文件不存在，写入表头
+            
             writer.writeheader()
-        
-        # 写入新的记录
-        for result in results:
-            writer.writerow(result)
+            
+            # 写入新的记录
+            for result in results:
+                writer.writerow(result)
 
-    print("Results saved to", csv_file)
+        #print("Results saved to", csv_file)
+
+
 
     dice_ET_avg = dice_ET / (index + 1)
     dice_WT_avg = dice_WT / (index + 1)
@@ -297,8 +329,9 @@ def main():
     print('Average score: Dice_ET = {:.4}, Dice_WT = {:.4}, Dice_TC = {:.4}, HD95_ET = {:.4}, HD95_WT = {:.4}, HD95_TC = {:.4}'.format(
         dice_ET_avg, dice_WT_avg, dice_TC_avg, hd95_ET_avg, hd95_WT_avg, hd95_TC_avg))
 
+
     # 定义 CSV 文件路径
-    averages_file = './averages_newmicca.csv'
+    averages_file = './averages-miccai.csv'
 
     # 定义 CSV 文件的列名
     fieldnames = ['mode', 'Dice_ET_Avg', 'Dice_WT_Avg', 'Dice_TC_Avg', 'HD95_ET_Avg', 'HD95_WT_Avg', 'HD95_TC_Avg']
@@ -329,7 +362,6 @@ def main():
         writer.writerow(new_record)
 
     print("Averages saved to", averages_file)
-
 
 if __name__ == '__main__':
     main()
