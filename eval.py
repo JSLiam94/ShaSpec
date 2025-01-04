@@ -110,14 +110,15 @@ def predict_sliding(args, net, img_list, tile_size, classes):
 
 
 def compute_hd95_single(pred, label, batch_size=1024):
+
     if pred.size == 0 and label.size == 0:
         return 0  
     if pred.size == 0 or label.size == 0:
         return 373.13  
-
     pred_points = torch.from_numpy(np.argwhere(pred > 0)).float().cuda()
     label_points = torch.from_numpy(np.argwhere(label > 0)).float().cuda()
-
+    if pred_points.size(0) ==0 and label_points.size(0) == 0:
+        return 0
     if pred_points.size(0) == 0 or label_points.size(0) == 0:
         return 373.13  
 
@@ -135,10 +136,17 @@ def compute_hd95_single(pred, label, batch_size=1024):
         distances_label_to_pred.append(distances)
 
     # 合并距离
-    all_distances = torch.cat(distances_pred_to_label + distances_label_to_pred)
+    distances_pred_to_label = torch.cat(distances_pred_to_label)
+    distances_label_to_pred = torch.cat(distances_label_to_pred)
 
     # 计算第 95 百分位数
-    hd95 = torch.kthvalue(all_distances, int(0.95 * all_distances.size(0)))[0].item()
+    hd95_pred_to_label = torch.kthvalue(distances_pred_to_label, int(0.95 * distances_pred_to_label.size(0)))[0].item()
+    hd95_label_to_pred = torch.kthvalue(distances_label_to_pred, int(0.95 * distances_label_to_pred.size(0)))[0].item()
+
+    hd95 = max(hd95_pred_to_label, hd95_label_to_pred)
+    if hd95 > 373.13:
+        hd95 = 373.13
+
     return hd95
 
 def compute_hd95(preds, labels, batch_size=1, num_threads=1):
